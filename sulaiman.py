@@ -1,157 +1,267 @@
-"""
-Hussain Mjrashi
------------------------------------------------------------------------------
-University Admission Chance Predictor
-NITA Academic Analytics — Predictive ML Model Deployment & Interactive Dashboard
-
-This Streamlit app is the local/EC2/Streamlit-Cloud front end for the model
-that was trained as the AWS SageMaker Canvas "Quick Build" regression
-equivalent. The RandomForestRegressor below is trained at startup on
-Admission_Predict_Ver1.1.csv and is tuned (n_estimators=300, max_depth=8)
-to reproduce the RMSE / R^2 recorded from the Canvas "Analyze" tab.
-
-Run locally:      streamlit run YourName_MLDeployment_App.py
-Run on EC2:       nohup streamlit run YourName_MLDeployment_App.py &
-Requirements:     see requirements.txt
------------------------------------------------------------------------------
-"""
-
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from datetime import date
 
-# -----------------------------------------------------------------------
-# Page configuration
-# -----------------------------------------------------------------------
 st.set_page_config(
-    page_title="Admission Chance Predictor",
-    page_icon="🎓",
-    layout="wide",
+    page_title="Financial Budget Tracker",
+    page_icon="💰",
+    layout="wide"
 )
 
-DATA_PATH = "Admission_Predict_Ver1.1.csv"
+st.title("💰 Financial Budget Tracker")
+st.write("Track income, expenses, and monthly budget performance.")
 
-
-# -----------------------------------------------------------------------
-# Model training (cached so it only runs once per session)
-# -----------------------------------------------------------------------
-@st.cache_resource
-def load_data_and_train_model():
-    df = pd.read_csv(DATA_PATH)
-    df.columns = [c.strip() for c in df.columns]
-
-    feature_cols = [
-        "GRE Score",
-        "TOEFL Score",
-        "University Rating",
-        "SOP",
-        "LOR",
-        "CGPA",
-        "Research",
+# Initial sample transactions
+initial_data = pd.DataFrame(
+    [
+        {
+            "Date": "2026-01-05",
+            "Description": "Monthly salary",
+            "Category": "Income",
+            "Type": "Income",
+            "Amount": 5000.00
+        },
+        {
+            "Date": "2026-01-07",
+            "Description": "House rent",
+            "Category": "Housing",
+            "Type": "Expense",
+            "Amount": 1500.00
+        },
+        {
+            "Date": "2026-01-10",
+            "Description": "Groceries",
+            "Category": "Food",
+            "Type": "Expense",
+            "Amount": 450.00
+        },
+        {
+            "Date": "2026-01-15",
+            "Description": "Transport",
+            "Category": "Transport",
+            "Type": "Expense",
+            "Amount": 250.00
+        }
     ]
-    X = df[feature_cols]
-    y = df["Chance of Admit"]
+)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+# Store transactions during the current Streamlit session
+if "transactions" not in st.session_state:
+    st.session_state.transactions = initial_data.copy()
+
+# Sidebar: add a new transaction
+st.sidebar.header("Add Transaction")
+
+transaction_date = st.sidebar.date_input(
+    "Date",
+    value=date.today()
+)
+
+description = st.sidebar.text_input(
+    "Description",
+    placeholder="Example: Electricity bill"
+)
+
+category = st.sidebar.selectbox(
+    "Category",
+    [
+        "Income",
+        "Housing",
+        "Food",
+        "Transport",
+        "Utilities",
+        "Healthcare",
+        "Education",
+        "Entertainment",
+        "Shopping",
+        "Other"
+    ]
+)
+
+transaction_type = st.sidebar.selectbox(
+    "Type",
+    ["Income", "Expense"]
+)
+
+amount = st.sidebar.number_input(
+    "Amount",
+    min_value=0.0,
+    step=10.0,
+    format="%.2f"
+)
+
+if st.sidebar.button("Add Transaction"):
+    if description.strip() == "":
+        st.sidebar.error("Please enter a description.")
+    elif amount <= 0:
+        st.sidebar.error("Amount must be greater than zero.")
+    else:
+        new_transaction = pd.DataFrame(
+            [
+                {
+                    "Date": transaction_date.strftime("%Y-%m-%d"),
+                    "Description": description,
+                    "Category": category,
+                    "Type": transaction_type,
+                    "Amount": amount
+                }
+            ]
+        )
+
+        st.session_state.transactions = pd.concat(
+            [st.session_state.transactions, new_transaction],
+            ignore_index=True
+        )
+
+        st.sidebar.success("Transaction added successfully.")
+
+# Copy data for calculations
+transactions = st.session_state.transactions.copy()
+transactions["Date"] = pd.to_datetime(transactions["Date"])
+
+# Calculate totals
+total_income = transactions.loc[
+    transactions["Type"] == "Income", "Amount"
+].sum()
+
+total_expenses = transactions.loc[
+    transactions["Type"] == "Expense", "Amount"
+].sum()
+
+balance = total_income - total_expenses
+
+# Dashboard metrics
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric(
+        label="Total Income",
+        value=f"${total_income:,.2f}"
     )
 
-    model = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42)
-    model.fit(X_train, y_train)
+with col2:
+    st.metric(
+        label="Total Expenses",
+        value=f"${total_expenses:,.2f}"
+    )
 
-    preds = model.predict(X_test)
-    rmse = float(np.sqrt(mean_squared_error(y_test, preds)))
-    r2 = float(r2_score(y_test, preds))
+with col3:
+    st.metric(
+        label="Current Balance",
+        value=f"${balance:,.2f}"
+    )
 
-    importances = pd.Series(model.feature_importances_, index=feature_cols)
-    importances = importances / importances.sum()  # relative importance, sums to 1
-    importances = importances.sort_values(ascending=True)  # ascending for barh plot
+st.divider()
 
-    dataset_avg = df[feature_cols].mean()
+# Monthly budget limit
+st.subheader("Budget Settings")
 
-    return model, feature_cols, rmse, r2, importances, dataset_avg
-
-
-model, feature_cols, rmse, r2, importances, dataset_avg = load_data_and_train_model()
-
-
-# -----------------------------------------------------------------------
-# Sidebar — Applicant Profile inputs
-# -----------------------------------------------------------------------
-st.sidebar.header("Applicant Profile")
-
-gre_score = st.sidebar.slider("GRE Score", min_value=260, max_value=340, value=316)
-toefl_score = st.sidebar.slider("TOEFL Score", min_value=90, max_value=120, value=107)
-university_rating = st.sidebar.selectbox(
-    "University Rating", options=[1, 2, 3, 4, 5], index=2
-)
-sop = st.sidebar.slider("SOP Strength", min_value=1.0, max_value=5.0, value=3.5, step=0.5)
-lor = st.sidebar.slider("LOR Strength", min_value=1.0, max_value=5.0, value=3.5, step=0.5)
-cgpa = st.sidebar.slider("CGPA", min_value=6.0, max_value=10.0, value=8.9, step=0.01)
-research = st.sidebar.radio("Research Experience", options=["No", "Yes"], index=1)
-research_val = 1 if research == "Yes" else 0
-
-input_row = pd.DataFrame(
-    [[gre_score, toefl_score, university_rating, sop, lor, cgpa, research_val]],
-    columns=feature_cols,
+monthly_budget = st.number_input(
+    "Monthly expense budget",
+    min_value=0.0,
+    value=3000.0,
+    step=100.0,
+    format="%.2f"
 )
 
-# -----------------------------------------------------------------------
-# Main panel — header + metrics
-# -----------------------------------------------------------------------
-st.title("🎓 University Admission Chance Predictor")
-st.caption(
-    "Interactive dashboard hosted via Streamlit — trained locally with parameters "
-    "equivalent to the AWS SageMaker Canvas Quick Build regression model."
+budget_usage = 0.0
+
+if monthly_budget > 0:
+    budget_usage = total_expenses / monthly_budget
+
+st.progress(
+    min(budget_usage, 1.0),
+    text=f"Budget used: {budget_usage * 100:.1f}%"
 )
 
-col1, col2 = st.columns(2)
-col1.metric("Model RMSE", f"{rmse:.4f}")
-col2.metric("Model R²", f"{r2:.4f}")
+if total_expenses > monthly_budget:
+    st.warning("Warning: Your expenses have exceeded the monthly budget.")
+else:
+    remaining = monthly_budget - total_expenses
+    st.success(f"Remaining budget: ${remaining:,.2f}")
 
-# -----------------------------------------------------------------------
-# Prediction
-# -----------------------------------------------------------------------
-predicted_chance = float(model.predict(input_row)[0])
-predicted_chance = min(max(predicted_chance, 0.0), 1.0)
+st.divider()
 
-st.subheader("Predicted Chance of Admit")
-st.progress(predicted_chance)
-st.markdown(f"### {predicted_chance * 100:.2f}%")
+# Expense analysis
+left_column, right_column = st.columns(2)
 
-# -----------------------------------------------------------------------
-# Charts — feature importance & profile vs. dataset average
-# -----------------------------------------------------------------------
-chart_col1, chart_col2 = st.columns(2)
+with left_column:
+    st.subheader("Expenses by Category")
 
-with chart_col1:
-    st.subheader("Feature Importance (Column Impact)")
-    fig1, ax1 = plt.subplots(figsize=(5, 4))
-    ax1.barh(importances.index, importances.values, color="#4C72B0")
-    ax1.set_xlabel("Relative Importance")
-    st.pyplot(fig1)
+    expense_data = transactions[
+        transactions["Type"] == "Expense"
+    ]
 
-with chart_col2:
-    st.subheader("Your Profile vs. Dataset Average")
-    fig2, ax2 = plt.subplots(figsize=(5, 4))
-    x = np.arange(len(feature_cols))
-    width = 0.35
-    ax2.bar(x - width / 2, [dataset_avg[c] for c in feature_cols], width, label="Dataset avg")
-    ax2.bar(x + width / 2, [input_row.iloc[0][c] for c in feature_cols], width, label="Your profile")
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(feature_cols, rotation=45, ha="right")
-    ax2.legend()
-    st.pyplot(fig2)
+    if not expense_data.empty:
+        expenses_by_category = (
+            expense_data
+            .groupby("Category")["Amount"]
+            .sum()
+            .sort_values(ascending=False)
+        )
 
-# -----------------------------------------------------------------------
-# Footer — deployment architecture note
-# -----------------------------------------------------------------------
-st.markdown("---")
-st.caption(
-    "Deployment architecture: PyCharm/Streamlit (Week 14) → GitHub 'nita20' (Week 15) "
-    "→ AWS EC2 + Apache2 reverse-proxy on port 80, and Streamlit Cloud hybrid deploy (Week 16)."
+        st.bar_chart(expenses_by_category)
+    else:
+        st.info("No expense data available.")
+
+with right_column:
+    st.subheader("Income and Expenses")
+
+    summary_data = pd.DataFrame(
+        {
+            "Amount": [
+                total_income,
+                total_expenses,
+                balance
+            ]
+        },
+        index=[
+            "Income",
+            "Expenses",
+            "Balance"
+        ]
+    )
+
+    st.bar_chart(summary_data)
+
+st.divider()
+
+# Filter transactions
+st.subheader("Transaction History")
+
+filter_type = st.selectbox(
+    "Filter by transaction type",
+    ["All", "Income", "Expense"]
 )
+
+if filter_type == "All":
+    filtered_transactions = transactions
+else:
+    filtered_transactions = transactions[
+        transactions["Type"] == filter_type
+    ]
+
+display_transactions = filtered_transactions.copy()
+display_transactions["Date"] = display_transactions["Date"].dt.strftime(
+    "%Y-%m-%d"
+)
+
+st.dataframe(
+    display_transactions.sort_values(
+        by="Date",
+        ascending=False
+    ),
+    use_container_width=True,
+    hide_index=True
+)
+
+# Download data
+csv_data = transactions.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Transactions as CSV",
+    data=csv_data,
+    file_name="budget_transactions.csv",
+    mime="text/csv"
+)
+
